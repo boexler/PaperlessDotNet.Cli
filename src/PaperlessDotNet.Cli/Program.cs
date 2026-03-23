@@ -12,6 +12,7 @@ internal static class Program
         var credentialService = new WindowsCredentialService();
         var clientFactory = new PaperlessClientFactory(credentialService);
         var updateService = new TagCorrespondentUpdateService(credentialService);
+        var mergeService = new CorrespondentMergeService(credentialService);
 
         var rootCommand = new RootCommand("CLI for Paperless-ngx built on PaperlessDotNet")
         {
@@ -19,7 +20,7 @@ internal static class Program
             Commands.LogoutCommand.Create(credentialService),
             Commands.DocumentsCommand.Create(credentialService, clientFactory),
             Commands.TagsCommand.Create(clientFactory, updateService),
-            Commands.CorrespondentsCommand.Create(clientFactory, updateService),
+            Commands.CorrespondentsCommand.Create(clientFactory, updateService, mergeService),
             Commands.DocumentTypesCommand.Create(clientFactory)
         };
 

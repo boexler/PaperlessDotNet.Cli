@@ -20,7 +20,7 @@ public static class CorrespondentsCommand
         DefaultValueFactory = _ => OutputFormat.Table
     };
 
-    public static Command Create(PaperlessClientFactory clientFactory, ITagCorrespondentUpdateService updateService)
+    public static Command Create(PaperlessClientFactory clientFactory, ITagCorrespondentUpdateService updateService, ICorrespondentMergeService mergeService)
     {
         var command = new Command("correspondents", "Manage correspondents")
         {
@@ -29,6 +29,7 @@ public static class CorrespondentsCommand
             CreateGetCommand(clientFactory),
             CreateCreateCommand(clientFactory),
             CreateUpdateCommand(updateService),
+            CreateMergeCommand(mergeService),
             CreateDeleteCommand(clientFactory)
         };
 
@@ -185,6 +186,45 @@ public static class CorrespondentsCommand
         });
 
         return updateCommand;
+    }
+
+    private static Command CreateMergeCommand(ICorrespondentMergeService mergeService)
+    {
+        var sourceArgument = new Argument<int>("source-id") { Description = "Correspondent ID to merge away (will be deleted)" };
+        var targetArgument = new Argument<int>("target-id") { Description = "Correspondent ID to keep (documents will be reassigned here)" };
+
+        var mergeCommand = new Command("merge", "Merge source correspondent into target (reassign documents, then delete source)")
+        {
+            UrlOption,
+            sourceArgument,
+            targetArgument
+        };
+
+        mergeCommand.SetAction(async (parseResult, cancellationToken) =>
+        {
+            try
+            {
+                var sourceId = parseResult.GetValue(sourceArgument);
+                var targetId = parseResult.GetValue(targetArgument);
+                var baseUrl = GetBaseUrl(parseResult);
+
+                var count = await mergeService.MergeAsync(sourceId, targetId, baseUrl, cancellationToken);
+                Console.WriteLine($"Merged correspondent {sourceId} into {targetId}. {count} document(s) reassigned.");
+                return 0;
+            }
+            catch (InvalidOperationException ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+            catch (HttpRequestException ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+        });
+
+        return mergeCommand;
     }
 
     private static Uri? GetBaseUrl(ParseResult parseResult)
