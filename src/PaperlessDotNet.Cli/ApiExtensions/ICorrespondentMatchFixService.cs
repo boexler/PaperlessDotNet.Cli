@@ -14,6 +14,7 @@ public interface ICorrespondentMatchFixService
     /// <param name="requireRegex">If true, fix all with MatchingAlgorithm != 4. If false, only fix empty Match.</param>
     /// <param name="baseUrl">Paperless base URL, or null for stored default.</param>
     /// <param name="correspondentId">If set, only process this correspondent. If null, process all.</param>
+    /// <param name="progress">Optional progress reporter for each result as it completes.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of fix results for reporting.</returns>
     Task<IReadOnlyList<CorrespondentMatchFixResult>> FixMatchAsync(
@@ -21,6 +22,7 @@ public interface ICorrespondentMatchFixService
         bool requireRegex,
         Uri? baseUrl,
         int? correspondentId = null,
+        IProgress<CorrespondentMatchFixResult>? progress = null,
         CancellationToken cancellationToken = default);
 }
 

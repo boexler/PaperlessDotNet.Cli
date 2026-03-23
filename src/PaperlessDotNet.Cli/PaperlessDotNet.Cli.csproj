@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <PackageReference Include="Meziantou.Framework.Win32.CredentialManager" Version="1.7.17" />
+    <PackageReference Include="Spectre.Console" Version="0.54.0" />
     <PackageReference Include="System.CommandLine" Version="2.0.5" />
     <PackageReference Include="VMelnalksnis.PaperlessDotNet" Version="1.2.0" />
   </ItemGroup>

@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.CommandLine;
 using System.Text.Json;
 using PaperlessDotNet.Cli.ApiExtensions;
+using Spectre.Console;
 using PaperlessDotNet.Cli.Configuration;
 using PaperlessDotNet.Cli.Output;
 using PaperlessDotNet.Cli.Services;
@@ -301,39 +302,47 @@ public static class CorrespondentsCommand
                 var correspondentId = parseResult.GetValue(idArgument);
                 var baseUrl = GetBaseUrl(parseResult);
 
-                var results = await matchFixService.FixMatchAsync(dryRun, requireRegex, baseUrl, correspondentId, cancellationToken);
-
-                foreach (var r in results)
+                var progress = new SynchronousProgress<CorrespondentMatchFixResult>(r =>
                 {
-                    var statusStr = r.Status switch
+                    var (color, statusStr) = r.Status switch
                     {
-                        CorrespondentMatchFixStatus.Applied => "Updated",
-                        CorrespondentMatchFixStatus.DryRun => "Would set",
-                        CorrespondentMatchFixStatus.Skipped => "Skipped",
-                        _ => r.Status.ToString()
+                        CorrespondentMatchFixStatus.Skipped => ("orange3", "Skipped"),
+                        CorrespondentMatchFixStatus.DryRun => ("green", "Would set"),
+                        _ => ("green", "Updated")
                     };
-                    Console.WriteLine($"Correspondent {r.CorrespondentId} \"{r.CorrespondentName}\" ({statusStr}): {r.Message}");
-                }
+                    var name = Markup.Escape(r.CorrespondentName);
+                    var msg = Markup.Escape(r.Message ?? "");
+                    AnsiConsole.MarkupLine($"[{color}]Correspondent {r.CorrespondentId} \"{name}\" ({statusStr}): {msg}[/]");
+                });
+
+                var results = await AnsiConsole.Status()
+                    .Spinner(Spinner.Known.Dots)
+                    .StartAsync("Loading correspondents...", async ctx =>
+                    {
+                        ctx.Status("Processing candidates...");
+                        return await matchFixService.FixMatchAsync(
+                            dryRun, requireRegex, baseUrl, correspondentId, progress, cancellationToken);
+                    });
 
                 var applied = results.Count(r => r.Status == CorrespondentMatchFixStatus.Applied);
                 var wouldSet = results.Count(r => r.Status == CorrespondentMatchFixStatus.DryRun);
                 var skipped = results.Count(r => r.Status == CorrespondentMatchFixStatus.Skipped);
-                Console.WriteLine();
+                AnsiConsole.WriteLine();
                 if (results.Count == 0)
-                    Console.WriteLine("No correspondents need fixing (all have regex match, or no empty match without --require-regex).");
+                    AnsiConsole.MarkupLine("No correspondents need fixing (all have regex match, or no empty match without --require-regex).");
                 else
-                    Console.WriteLine($"Summary: {results.Count} candidate(s) | {(dryRun ? "Would set" : "Updated")}: {applied + wouldSet} | Skipped: {skipped}");
+                    AnsiConsole.MarkupLine($"Summary: {results.Count} candidate(s) | {(dryRun ? "Would set" : "Updated")}: {applied + wouldSet} | [orange3]Skipped: {skipped}[/]");
 
                 return 0;
             }
             catch (InvalidOperationException ex)
             {
-                Console.Error.WriteLine(ex.Message);
+                AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
                 return 1;
             }
             catch (HttpRequestException ex)
             {
-                Console.Error.WriteLine(ex.Message);
+                AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
                 return 1;
             }
         });
@@ -438,5 +447,12 @@ public static class CorrespondentsCommand
         else
             foreach (var item in list)
                 Console.WriteLine(OutputFormatters.ToJson(item));
+    }
+
+    private sealed class SynchronousProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _handler;
+        public SynchronousProgress(Action<T> handler) => _handler = handler;
+        public void Report(T value) => _handler(value);
     }
 }

@@ -49,6 +49,7 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
         bool requireRegex,
         Uri? baseUrl,
         int? correspondentId = null,
+        IProgress<CorrespondentMatchFixResult>? progress = null,
         CancellationToken cancellationToken = default)
     {
         using var client = CreateHttpClient(baseUrl);
@@ -67,6 +68,7 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
             var result = await ProcessCorrespondentAsync(
                 client, correspondent, dryRun, baseUrl, cancellationToken).ConfigureAwait(false);
             results.Add(result);
+            progress?.Report(result);
         }
 
         return results;
