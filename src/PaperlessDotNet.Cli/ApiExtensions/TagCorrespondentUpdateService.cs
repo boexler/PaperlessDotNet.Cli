@@ -43,7 +43,8 @@ public sealed class TagCorrespondentUpdateService : ITagCorrespondentUpdateServi
     {
         using var client = CreateHttpClient(baseUrl);
 
-        using var content = JsonContent.Create(patch, options: SerializerOptions);
+        var requestBody = JsonSerializer.Serialize(patch, SerializerOptions);
+        using var content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json");
         using var request = new HttpRequestMessage(HttpMethod.Patch, $"api/tags/{id}/") { Content = content };
         using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
@@ -66,7 +67,8 @@ public sealed class TagCorrespondentUpdateService : ITagCorrespondentUpdateServi
     {
         using var client = CreateHttpClient(baseUrl);
 
-        using var content = JsonContent.Create(patch, options: SerializerOptions);
+        var requestBody = JsonSerializer.Serialize(patch, SerializerOptions);
+        using var content = new StringContent(requestBody, System.Text.Encoding.UTF8, "application/json");
         using var request = new HttpRequestMessage(HttpMethod.Patch, $"api/correspondents/{id}/") { Content = content };
         using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
