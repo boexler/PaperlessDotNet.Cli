@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>PaperlessDotNet.Cli</RootNamespace>
+    <AssemblyName>paperless</AssemblyName>
+    <Product>PaperlessDotNet.Cli</Product>
+    <Description>CLI for Paperless-ngx built on PaperlessDotNet</Description>
+    <Version>0.1.0</Version>
+    <Authors>PaperlessDotNet.Cli</Authors>
+    <Nullable>enable</Nullable>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
+  <!-- Publish configuration for standalone Windows executable.
+       Build with: dotnet publish -c Release -r win-x64 -->
+  <PropertyGroup>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Meziantou.Framework.Win32.CredentialManager" Version="1.7.17" />
+    <PackageReference Include="System.CommandLine" Version="2.0.5" />
+    <PackageReference Include="VMelnalksnis.PaperlessDotNet" Version="1.2.0" />
+  </ItemGroup>
+
+</Project>
