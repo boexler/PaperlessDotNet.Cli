@@ -30,10 +30,24 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
         @"(?:https?://(?:www\.)?([^/\s?#]+)|(?<=[\s(])([a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,})(?=[\s)/?#]|$))",
         RegexOptions.Compiled);
 
+    /// <summary>Extract domain from email addresses, e.g. info@airless-experts.de -> airless-experts.de.</summary>
+    private static readonly Regex EmailDomainRegex = new(
+        @"[a-zA-Z0-9._%+-]+@([a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,})",
+        RegexOptions.Compiled);
+
     /// <summary>Extract domain from correspondent name, e.g. "GOG.com Team" -> "gog.com".</summary>
     private static readonly Regex NameDomainRegex = new(
         @"[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}",
         RegexOptions.Compiled);
+
+    /// <summary>File extensions to exclude from domain extraction (rechnung.pdf, 30598.eml etc. are filenames, not URLs).</summary>
+    private static readonly HashSet<string> FileExtensionBlocklist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "gif",
+        "html", "htm", "txt", "csv", "xml", "json", "zip", "rar", "exe", "dll", "eml", "msg"
+    };
+
+    private enum DomainSource { FromBare, FromEmail, FromUrl }
 
     public CorrespondentMatchFixService(
         ICredentialService credentialService,
@@ -50,6 +64,7 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
         Uri? baseUrl,
         int? correspondentId = null,
         IProgress<CorrespondentMatchFixResult>? progress = null,
+        Action<int, string, string>? onSkippedNoDomains = null,
         CancellationToken cancellationToken = default)
     {
         using var client = CreateHttpClient(baseUrl);
@@ -66,7 +81,7 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
         foreach (var correspondent in candidates)
         {
             var result = await ProcessCorrespondentAsync(
-                client, correspondent, dryRun, baseUrl, cancellationToken).ConfigureAwait(false);
+                client, correspondent, dryRun, baseUrl, onSkippedNoDomains, cancellationToken).ConfigureAwait(false);
             results.Add(result);
             progress?.Report(result);
         }
@@ -87,7 +102,9 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
     {
         if (string.IsNullOrWhiteSpace(name)) return null;
         var m = NameDomainRegex.Match(name);
-        return m.Success ? ToRootDomain(m.Value) : null;
+        if (!m.Success) return null;
+        var domain = ToRootDomain(m.Value);
+        return IsFileExtension(domain) ? null : domain;
     }
 
     private async Task<CorrespondentMatchFixResult> ProcessCorrespondentAsync(
@@ -95,6 +112,7 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
         CorrespondentListItem correspondent,
         bool dryRun,
         Uri? baseUrl,
+        Action<int, string, string>? onSkippedNoDomains,
         CancellationToken cancellationToken)
     {
         var domainFromName = ExtractDomainFromName(correspondent.Name);
@@ -119,16 +137,23 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
                     "No documents found - skipped");
             }
 
-            var domains = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var domains = new Dictionary<string, (int Count, DomainSource Source)>(StringComparer.OrdinalIgnoreCase);
+            var searchText = new System.Text.StringBuilder();
 
             foreach (var docId in documentIds)
             {
-                var (title, content) = await GetDocumentContentAsync(client, docId, cancellationToken).ConfigureAwait(false);
-                ExtractDomains(title + " " + content, domains);
+                var (title, content, fileName) = await GetDocumentContentAsync(client, docId, cancellationToken).ConfigureAwait(false);
+                var text = title + " " + content + " " + fileName;
+                ExtractDomains(text, domains);
+                searchText.Append(text).Append(' ');
             }
 
             if (domains.Count == 0)
             {
+                var preview = searchText.ToString();
+                if (preview.Length > 1500)
+                    preview = preview[..1500] + "...";
+                onSkippedNoDomains?.Invoke(correspondent.Id, correspondent.Name, preview);
                 return new CorrespondentMatchFixResult(
                     correspondent.Id,
                     correspondent.Name,
@@ -137,11 +162,7 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
                     "No URL domain found in documents - skipped");
             }
 
-            rootDomain = domains
-                .OrderByDescending(x => x.Value)
-                .ThenBy(x => x.Key)
-                .First()
-                .Key;
+            rootDomain = SelectBestDomain(domains);
         }
 
         var matchRegex = ".*" + Regex.Escape(rootDomain) + ".*";
@@ -183,7 +204,7 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
         return domain.Trim().ToLowerInvariant();
     }
 
-    private static void ExtractDomains(string text, Dictionary<string, int> domains)
+    private static void ExtractDomains(string text, Dictionary<string, (int Count, DomainSource Source)> domains)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
 
@@ -193,12 +214,55 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
             if (string.IsNullOrWhiteSpace(domain)) continue;
 
             domain = ToRootDomain(domain);
-            if (domain.Contains('.') && domain.Length > 3)
+            if (domain.Contains('.') && domain.Length > 3 && !IsFileExtension(domain))
             {
-                domains.TryGetValue(domain, out var count);
-                domains[domain] = count + 1;
+                var source = m.Groups[1].Success ? DomainSource.FromUrl : DomainSource.FromBare;
+                AddOrUpgradeDomain(domains, domain, source);
             }
         }
+
+        foreach (Match m in EmailDomainRegex.Matches(text))
+        {
+            var domain = m.Groups[1].Value;
+            if (string.IsNullOrWhiteSpace(domain)) continue;
+
+            domain = ToRootDomain(domain);
+            if (domain.Contains('.') && domain.Length > 3 && !IsFileExtension(domain))
+                AddOrUpgradeDomain(domains, domain, DomainSource.FromEmail);
+        }
+    }
+
+    private static void AddOrUpgradeDomain(
+        Dictionary<string, (int Count, DomainSource Source)> domains,
+        string domain,
+        DomainSource source)
+    {
+        if (domains.TryGetValue(domain, out var existing))
+        {
+            var newSource = source > existing.Source ? source : existing.Source;
+            domains[domain] = (existing.Count + 1, newSource);
+        }
+        else
+        {
+            domains[domain] = (1, source);
+        }
+    }
+
+    private static string SelectBestDomain(Dictionary<string, (int Count, DomainSource Source)> domains)
+    {
+        return domains
+            .OrderByDescending(x => x.Value.Source)
+            .ThenByDescending(x => x.Value.Count)
+            .ThenBy(x => x.Key)
+            .First()
+            .Key;
+    }
+
+    /// <summary>True if the string is a filename pattern like rechnung.pdf, not a real domain.</summary>
+    private static bool IsFileExtension(string domain)
+    {
+        var tld = domain.AsSpan()[(domain.LastIndexOf('.') + 1)..];
+        return tld.Length <= 5 && FileExtensionBlocklist.Contains(tld.ToString());
     }
 
     private static async Task<List<CorrespondentListItem>> GetAllCorrespondentsAsync(
@@ -261,7 +325,7 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
         return string.IsNullOrEmpty(pathAndQuery) ? null : pathAndQuery;
     }
 
-    private static async Task<(string Title, string Content)> GetDocumentContentAsync(
+    private static async Task<(string Title, string Content, string FileName)> GetDocumentContentAsync(
         HttpClient client,
         int documentId,
         CancellationToken cancellationToken)
@@ -271,7 +335,7 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
         var doc = await response.Content.ReadFromJsonAsync<DocumentContentResponse>(DeserializerOptions, cancellationToken)
             .ConfigureAwait(false);
 
-        return (doc?.Title ?? "", doc?.Content ?? "");
+        return (doc?.Title ?? "", doc?.Content ?? "", doc?.OriginalFileName ?? "");
     }
 
     private HttpClient CreateHttpClient(Uri? baseUrl)
@@ -331,5 +395,8 @@ public sealed class CorrespondentMatchFixService : ICorrespondentMatchFixService
     {
         public string? Title { get; set; }
         public string? Content { get; set; }
+
+        [JsonPropertyName("original_file_name")]
+        public string? OriginalFileName { get; set; }
     }
 }

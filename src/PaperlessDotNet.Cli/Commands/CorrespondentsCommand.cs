@@ -284,13 +284,18 @@ public static class CorrespondentsCommand
         {
             Description = "Fix all with MatchingAlgorithm != 4 (regex). Without: only fix empty Match"
         };
+        var verboseOption = new Option<bool>("--verbose")
+        {
+            Description = "When skipping (no URL domain found), print a preview of the document text that was searched"
+        };
 
         var fixMatchCommand = new Command("fix-match", "Fix correspondent Match by extracting URL domains from documents and setting regex")
         {
             UrlOption,
             idArgument,
             dryRunOption,
-            requireRegexOption
+            requireRegexOption,
+            verboseOption
         };
 
         fixMatchCommand.SetAction(async (parseResult, cancellationToken) =>
@@ -299,8 +304,13 @@ public static class CorrespondentsCommand
             {
                 var dryRun = parseResult.GetValue(dryRunOption);
                 var requireRegex = parseResult.GetValue(requireRegexOption);
+                var verbose = parseResult.GetValue(verboseOption);
                 var correspondentId = parseResult.GetValue(idArgument);
                 var baseUrl = GetBaseUrl(parseResult);
+
+                Action<int, string, string>? onSkippedNoDomains = verbose
+                    ? (id, name, preview) => AnsiConsole.MarkupLine($"[dim]Debug (correspondent {id}): searched text preview:\n{Markup.Escape(preview)}[/]")
+                    : null;
 
                 var progress = new SynchronousProgress<CorrespondentMatchFixResult>(r =>
                 {
@@ -321,7 +331,7 @@ public static class CorrespondentsCommand
                     {
                         ctx.Status("Processing candidates...");
                         return await matchFixService.FixMatchAsync(
-                            dryRun, requireRegex, baseUrl, correspondentId, progress, cancellationToken);
+                            dryRun, requireRegex, baseUrl, correspondentId, progress, onSkippedNoDomains, cancellationToken);
                     });
 
                 var applied = results.Count(r => r.Status == CorrespondentMatchFixStatus.Applied);

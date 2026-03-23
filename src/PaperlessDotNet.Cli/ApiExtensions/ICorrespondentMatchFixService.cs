@@ -15,6 +15,7 @@ public interface ICorrespondentMatchFixService
     /// <param name="baseUrl">Paperless base URL, or null for stored default.</param>
     /// <param name="correspondentId">If set, only process this correspondent. If null, process all.</param>
     /// <param name="progress">Optional progress reporter for each result as it completes.</param>
+    /// <param name="onSkippedNoDomains">When set, invoked with (correspondentId, correspondentName, searchTextPreview) when no URL domain found. Use for --verbose.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of fix results for reporting.</returns>
     Task<IReadOnlyList<CorrespondentMatchFixResult>> FixMatchAsync(
@@ -23,6 +24,7 @@ public interface ICorrespondentMatchFixService
         Uri? baseUrl,
         int? correspondentId = null,
         IProgress<CorrespondentMatchFixResult>? progress = null,
+        Action<int, string, string>? onSkippedNoDomains = null,
         CancellationToken cancellationToken = default);
 }
 
