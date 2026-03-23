@@ -41,14 +41,7 @@ public sealed class PaperlessClientFactory
         }
 
         var (baseAddress, token) = credential.Value;
-
-        var httpClient = new HttpClient
-        {
-            BaseAddress = new Uri(baseAddress.ToString().TrimEnd('/') + "/")
-        };
-
-        httpClient.DefaultRequestHeaders.Add("Accept", $"{MediaTypeNames.Application.Json}; version=2");
-        httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Token", token);
+        var httpClient = CreateHttpClient(baseAddress, token);
 
         var serializerOptions = new PaperlessJsonSerializerOptions(DateTimeZoneProviders.Tzdb);
         var taskClient = new TaskClient(httpClient, serializerOptions);
@@ -66,5 +59,32 @@ public sealed class PaperlessClientFactory
             documentClient,
             documentTypeClient,
             tagClient);
+    }
+
+    /// <summary>
+    /// Creates an HttpClient with the same auth and configuration as the API client.
+    /// Use this for custom API calls that need identical credential handling.
+    /// </summary>
+    public HttpClient CreateHttpClient(Uri? baseUrl = null)
+    {
+        var credential = _credentialService.GetCredential(baseUrl)
+            ?? throw new InvalidOperationException(
+                "No credentials found. Run 'paperless login --url <base-url> --token <api-token>' first.");
+
+        var (baseAddress, token) = credential;
+        return CreateHttpClient(baseAddress, token);
+    }
+
+    private static HttpClient CreateHttpClient(Uri baseAddress, string token)
+    {
+        var httpClient = new HttpClient
+        {
+            BaseAddress = new Uri(baseAddress.ToString().TrimEnd('/') + "/")
+        };
+
+        httpClient.DefaultRequestHeaders.Add("Accept", $"{MediaTypeNames.Application.Json}; version=2");
+        httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Token", token);
+
+        return httpClient;
     }
 }

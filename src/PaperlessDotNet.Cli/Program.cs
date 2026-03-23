@@ -13,6 +13,7 @@ internal static class Program
         var clientFactory = new PaperlessClientFactory(credentialService);
         var updateService = new TagCorrespondentUpdateService(credentialService);
         var mergeService = new CorrespondentMergeService(credentialService);
+        var matchFixService = new CorrespondentMatchFixService(credentialService, updateService);
 
         var rootCommand = new RootCommand("CLI for Paperless-ngx built on PaperlessDotNet")
         {
@@ -20,7 +21,7 @@ internal static class Program
             Commands.LogoutCommand.Create(credentialService),
             Commands.DocumentsCommand.Create(credentialService, clientFactory),
             Commands.TagsCommand.Create(clientFactory, updateService),
-            Commands.CorrespondentsCommand.Create(clientFactory, updateService, mergeService),
+            Commands.CorrespondentsCommand.Create(clientFactory, updateService, mergeService, matchFixService),
             Commands.DocumentTypesCommand.Create(clientFactory)
         };
 
