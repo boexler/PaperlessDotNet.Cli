@@ -1,4 +1,6 @@
+using System.Net.Http;
 using System.CommandLine;
+using PaperlessDotNet.Cli.ApiExtensions;
 using PaperlessDotNet.Cli.Configuration;
 using PaperlessDotNet.Cli.Output;
 using PaperlessDotNet.Cli.Services;
@@ -18,7 +20,7 @@ public static class CorrespondentsCommand
         DefaultValueFactory = _ => OutputFormat.Table
     };
 
-    public static Command Create(PaperlessClientFactory clientFactory)
+    public static Command Create(PaperlessClientFactory clientFactory, ITagCorrespondentUpdateService updateService)
     {
         var command = new Command("correspondents", "Manage correspondents")
         {
@@ -26,6 +28,7 @@ public static class CorrespondentsCommand
             CreateListCommand(clientFactory),
             CreateGetCommand(clientFactory),
             CreateCreateCommand(clientFactory),
+            CreateUpdateCommand(updateService),
             CreateDeleteCommand(clientFactory)
         };
 
@@ -117,6 +120,79 @@ public static class CorrespondentsCommand
         });
 
         return createCommand;
+    }
+
+    private static Command CreateUpdateCommand(ITagCorrespondentUpdateService updateService)
+    {
+        var idArgument = new Argument<int>("id") { Description = "Correspondent ID" };
+        var nameOption = new Option<string?>("--name");
+        var matchOption = new Option<string?>("--match");
+        var matchingAlgorithmOption = new Option<int?>("--matching-algorithm")
+        {
+            Description = "0=None, 1=Any word, 2=All words, 3=Exact, 4=Regex, 5=Fuzzy, 6=Automatic"
+        };
+        var isInsensitiveOption = new Option<bool?>("--is-insensitive");
+
+        var updateCommand = new Command("update", "Update a correspondent")
+        {
+            UrlOption,
+            OutputOption,
+            idArgument,
+            nameOption,
+            matchOption,
+            matchingAlgorithmOption,
+            isInsensitiveOption
+        };
+
+        updateCommand.SetAction(async (parseResult, cancellationToken) =>
+        {
+            try
+            {
+                var id = parseResult.GetValue(idArgument);
+                var baseUrl = GetBaseUrl(parseResult);
+
+                var patch = new CorrespondentPatchDto
+                {
+                    Name = parseResult.GetValue(nameOption),
+                    Match = parseResult.GetValue(matchOption),
+                    MatchingAlgorithm = parseResult.GetValue(matchingAlgorithmOption),
+                    IsInsensitive = parseResult.GetValue(isInsensitiveOption)
+                };
+
+                var hasAnyField = patch.Name is not null || patch.Match is not null
+                    || patch.MatchingAlgorithm is not null || patch.IsInsensitive is not null;
+                if (!hasAnyField)
+                {
+                    Console.Error.WriteLine("Specify at least one field to update: --name, --match, --matching-algorithm, --is-insensitive");
+                    return 1;
+                }
+
+                var result = await updateService.UpdateCorrespondentAsync(id, patch, baseUrl, cancellationToken);
+                Console.WriteLine($"Correspondent {id} updated.");
+                Console.WriteLine(OutputFormatters.ToJson(result));
+                return 0;
+            }
+            catch (InvalidOperationException ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+            catch (HttpRequestException ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+        });
+
+        return updateCommand;
+    }
+
+    private static Uri? GetBaseUrl(ParseResult parseResult)
+    {
+        var urlStr = parseResult.GetValue(UrlOption);
+        if (string.IsNullOrEmpty(urlStr) || !Uri.TryCreate(urlStr, UriKind.Absolute, out var parsed) || !parsed.IsAbsoluteUri)
+            return null;
+        return parsed;
     }
 
     private static Command CreateDeleteCommand(PaperlessClientFactory clientFactory)

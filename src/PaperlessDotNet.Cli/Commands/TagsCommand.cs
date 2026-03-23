@@ -1,4 +1,6 @@
+using System.Net.Http;
 using System.CommandLine;
+using PaperlessDotNet.Cli.ApiExtensions;
 using PaperlessDotNet.Cli.Configuration;
 using PaperlessDotNet.Cli.Output;
 using PaperlessDotNet.Cli.Services;
@@ -18,7 +20,7 @@ public static class TagsCommand
         DefaultValueFactory = _ => OutputFormat.Table
     };
 
-    public static Command Create(PaperlessClientFactory clientFactory)
+    public static Command Create(PaperlessClientFactory clientFactory, ITagCorrespondentUpdateService updateService)
     {
         var tagsCommand = new Command("tags", "Manage tags")
         {
@@ -26,6 +28,7 @@ public static class TagsCommand
             CreateListCommand(clientFactory),
             CreateGetCommand(clientFactory),
             CreateCreateCommand(clientFactory),
+            CreateUpdateCommand(updateService),
             CreateDeleteCommand(clientFactory)
         };
 
@@ -122,6 +125,80 @@ public static class TagsCommand
         return command;
     }
 
+    private static Command CreateUpdateCommand(ITagCorrespondentUpdateService updateService)
+    {
+        var idArgument = new Argument<int>("id") { Description = "Tag ID" };
+        var nameOption = new Option<string?>("--name");
+        var colorOption = new Option<string?>("--color")
+        {
+            Description = "Hex color, e.g. #ff0000"
+        };
+        var matchOption = new Option<string?>("--match");
+        var matchingAlgorithmOption = new Option<int?>("--matching-algorithm")
+        {
+            Description = "0=None, 1=Any word, 2=All words, 3=Exact, 4=Regex, 5=Fuzzy, 6=Automatic"
+        };
+        var isInsensitiveOption = new Option<bool?>("--is-insensitive");
+        var isInboxTagOption = new Option<bool?>("--is-inbox-tag");
+
+        var command = new Command("update", "Update a tag")
+        {
+            UrlOption,
+            OutputOption,
+            idArgument,
+            nameOption,
+            colorOption,
+            matchOption,
+            matchingAlgorithmOption,
+            isInsensitiveOption,
+            isInboxTagOption
+        };
+
+        command.SetAction(async (parseResult, cancellationToken) =>
+        {
+            try
+            {
+                var id = parseResult.GetValue(idArgument);
+                var baseUrl = GetBaseUrl(parseResult);
+
+                var patch = new TagPatchDto
+                {
+                    Name = parseResult.GetValue(nameOption),
+                    Color = parseResult.GetValue(colorOption),
+                    Match = parseResult.GetValue(matchOption),
+                    MatchingAlgorithm = parseResult.GetValue(matchingAlgorithmOption),
+                    IsInsensitive = parseResult.GetValue(isInsensitiveOption),
+                    IsInboxTag = parseResult.GetValue(isInboxTagOption)
+                };
+
+                var hasAnyField = patch.Name is not null || patch.Color is not null || patch.Match is not null
+                    || patch.MatchingAlgorithm is not null || patch.IsInsensitive is not null || patch.IsInboxTag is not null;
+                if (!hasAnyField)
+                {
+                    Console.Error.WriteLine("Specify at least one field to update: --name, --color, --match, --matching-algorithm, --is-insensitive, --is-inbox-tag");
+                    return 1;
+                }
+
+                var result = await updateService.UpdateTagAsync(id, patch, baseUrl, cancellationToken);
+                Console.WriteLine($"Tag {id} updated.");
+                Console.WriteLine(OutputFormatters.ToJson(result));
+                return 0;
+            }
+            catch (InvalidOperationException ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+            catch (HttpRequestException ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
+        });
+
+        return command;
+    }
+
     private static Command CreateDeleteCommand(PaperlessClientFactory clientFactory)
     {
         var idArgument = new Argument<int>("id") { Description = "Tag ID" };
@@ -144,6 +221,14 @@ public static class TagsCommand
         });
 
         return command;
+    }
+
+    private static Uri? GetBaseUrl(ParseResult parseResult)
+    {
+        var urlStr = parseResult.GetValue(UrlOption);
+        if (string.IsNullOrEmpty(urlStr) || !Uri.TryCreate(urlStr, UriKind.Absolute, out var parsed) || !parsed.IsAbsoluteUri)
+            return null;
+        return parsed;
     }
 
     private static VMelnalksnis.PaperlessDotNet.IPaperlessClient? GetClient(ParseResult parseResult, PaperlessClientFactory factory)
